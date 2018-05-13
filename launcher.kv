@@ -1,0 +1,82 @@
+#:kivy 1.10.0
+#:import main main
+#:import md_icons kivymd.icon_definitions.md_icons
+#:import ListAdapter kivy.adapters.listadapter.ListAdapter
+#:import ListItemButton kivy.uix.listview.ListItemButton
+
+CustBoxLayout:
+<ViewButton@Button>:
+    background_color: .3, .3, .3, 1
+    background_down: 'img/FFFFFF-0.png'
+
+    halign: 'left'
+    valign: 'center'
+
+    text_size: self.size
+    padding_x: 10
+
+    on_release: main.launcher.start_file(self.path)
+
+    ext: ''
+
+    Label:
+        text: root.ext.replace('.', '') if root.ext != '' else 'dir'
+        
+        pos: (root.pos[0] + root.width - self.width + self.width*.2, root.pos[1] - 34)
+
+        color: .2, .2, .2, 1
+
+
+<CustBoxLayout>:
+    padding: 4
+
+    orientation: 'vertical'
+
+    BoxLayout:
+        spacing: 8
+        
+        size_hint_y: None
+        height: 33
+        
+        pos_hint: {'top': True}
+
+        TextInput:
+            id: search_field
+
+            size_hint: None, None
+            size: 200, 33
+            
+            background_normal: 'img/FFFFFF.png'
+            cursor_color: 0, 0, 0, 1
+
+            on_focus: main.launcher.l.dropdown_show()
+
+        BoxLayout:
+            padding: -8
+
+            MaterialIconButton:
+                id: dropdown_button
+
+                icon: 'md-arrow-drop-down-circle'
+                
+                on_release: root.dropdown_show()
+
+            MaterialIconButton:
+                id: add_button
+
+                icon: 'md-add-circle'
+
+    Widget:
+        size_hint_y: .02
+
+    RV:
+        id: item_list
+
+        viewclass: 'ViewButton'
+        
+        RecycleBoxLayout:
+            default_size: None, 30
+            default_size_hint: 1, None
+            size_hint: 1, None
+            height: self.minimum_height
+            orientation: 'vertical'
