@@ -20,11 +20,39 @@ CustBoxLayout:
     ext: ''
 
     Label:
-        text: root.ext.replace('.', '') if root.ext != '' else 'dir'
+        text: root.ext
         
         pos: (root.pos[0] + root.width - self.width + self.width*.2, root.pos[1] - 34)
 
         color: .2, .2, .2, 1
+
+<ActionButton@Button>:
+    size_hint: None, None
+    width: 50
+    height: 40
+
+<LoadDialog>:
+    BoxLayout:
+        orientation: 'vertical'
+        size: root.size
+        pos: root.pos
+
+        FileChooserListView:
+            id: filechooser
+        
+        BoxLayout:
+            size_hint_y: None
+            height: 30
+
+            Widget:
+
+            ActionButton:
+                text: 'Cancel'
+                on_release: root.cancel()
+
+            ActionButton:
+                text: 'Load'
+                on_release: root.load(filechooser.path, filechooser.selection)
 
 
 <CustBoxLayout>:
@@ -33,6 +61,8 @@ CustBoxLayout:
     orientation: 'vertical'
 
     BoxLayout:
+        id: head
+
         spacing: 8
         
         size_hint_y: None
@@ -55,6 +85,8 @@ CustBoxLayout:
             on_text_validate: main.launcher.enter_hit_callback()
 
         BoxLayout:
+            id: btn_box
+
             padding: -8
 
             MaterialIconButton:
@@ -69,17 +101,25 @@ CustBoxLayout:
 
                 icon: 'md-add-circle'
 
-    Widget:
-        size_hint_y: .02
+                on_release: root.show_load()
 
-    RecycleView:
-        id: item_list
+    BoxLayout:
+        id: lister
 
-        viewclass: 'ViewButton'
-        
-        RecycleBoxLayout:
-            default_size: None, 30
-            default_size_hint: 1, None
-            size_hint: 1, None
-            height: self.minimum_height
-            orientation: 'vertical'
+        orientation: 'vertical'
+
+        Widget:
+            size_hint_y: .02
+
+        RecycleView:
+            id: item_list
+
+            viewclass: 'ViewButton'
+            
+            RecycleBoxLayout:
+                default_size: None, 30
+                default_size_hint: 1, None
+                size_hint: None, None
+                width: item_list.width
+                height: self.minimum_height
+                orientation: 'vertical'

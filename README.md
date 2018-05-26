@@ -1,5 +1,10 @@
 # FastFastLauncher
 
+## V 1.2
+### New features:
+ - Support for adding custom files
+ - Support for window moving
+
 ## V 1.1
 ### New features:
  - You can now open file by hitting the *Enter* key after typing search expression
