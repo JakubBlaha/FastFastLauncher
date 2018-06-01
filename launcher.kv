@@ -1,5 +1,4 @@
 #:kivy 1.10.0
-#:import main main
 #:import md_icons kivymd.icon_definitions.md_icons
 #:import ListAdapter kivy.adapters.listadapter.ListAdapter
 #:import ListItemButton kivy.uix.listview.ListItemButton
@@ -15,7 +14,7 @@ CustBoxLayout:
     text_size: self.size
     padding_x: 10
 
-    on_release: main.launcher.item_click_callback(self.path)
+    on_release: app.item_click_callback(self.path)
 
     ext: ''
 
@@ -81,8 +80,8 @@ CustBoxLayout:
 
             multiline: False
 
-            on_focus: main.launcher.l.dropdown_show()
-            on_text_validate: main.launcher.enter_hit_callback()
+            on_focus: app.l.dropdown_show()
+            on_text_validate: app.enter_hit_callback()
 
         BoxLayout:
             id: btn_box
@@ -108,11 +107,13 @@ CustBoxLayout:
 
         orientation: 'vertical'
 
-        Widget:
-            size_hint_y: .02
+        padding: 0, 4
 
         RecycleView:
             id: item_list
+
+            size_hint_x: None
+            width: 292
 
             viewclass: 'ViewButton'
             

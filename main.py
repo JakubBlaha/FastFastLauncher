@@ -1,14 +1,12 @@
 from win32api import GetSystemMetrics
 from win32gui import GetCursorInfo
-from time import sleep
-from nop import NOP
+from KivyOnTop import *
 import os
 import sys
 import win32com.client
 import win32gui
 import win32con
-import string
-import shutil
+from infi.systray import SysTrayIcon
 
 import kivy
 kivy.require('1.10.0')
@@ -28,17 +26,20 @@ from kivy.app import App
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.animation import Animation
-from kivy.event import EventDispatcher
 from kivy.properties import ObjectProperty
-from kivy.properties import NumericProperty
+from kivy.properties import BooleanProperty
 
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.textinput import TextInput
-from kivy.uix.recycleview import RecycleView
 from kivy.uix.popup import Popup
-
 from kivymd.button import MaterialIconButton
+
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    base_path = getattr(sys, '_MEIPASS',
+                        os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 
 def get_desktop_dir() -> list:
@@ -92,6 +93,7 @@ def prepare_rv_list(paths: list) -> list:
 
 def get_filtered(string_: str) -> list:
     paths = list_desktop()
+    paths.extend(Config.get_all())
     items = prepare_rv_list(paths)
 
     condition = lambda item: string_.lower() in f"{item['text']}{item['ext']}".lower()
@@ -127,7 +129,7 @@ def open_file(path: str):
 
 
 class Config:
-    PATH = os.path.expanduser('~\\Xtremeware\\FastFastLauncher\\paths.txt')
+    PATH = os.path.expanduser('~\\.xtremeware\\FastFastLauncher\\paths.txt')
     paths = []
 
     @staticmethod
@@ -173,8 +175,9 @@ class Config:
 
     @staticmethod
     def _ensure_config_file():
-        if not os.path.isdir(os.path.dirname(Config.PATH)):
-            os.makedirs(Config.PATH)
+        dirname = os.path.dirname(Config.PATH)
+        if not os.path.isdir(dirname):
+            os.makedirs(dirname)
 
         if not os.path.isfile(Config.PATH):
             Config._create_empty_file(Config.PATH)
@@ -194,7 +197,7 @@ class WindowDragBehavior:
     horizontal = False
     vertical = False
 
-    def drag_behavior_init(self, mode: str='both'):
+    def drag_behavior_init(self, mode: str = 'both'):
         '''
         mode - both, horizontal, vertical
         '''
@@ -228,16 +231,17 @@ class WindowDragBehavior:
 
         if self.both or self.horizontal:
             Window.left = x
-        
+
         if self.both or self.vertical:
             Window.top = y
 
 
-class CustBoxLayout(WindowDragBehavior, BoxLayout):
-    size_ = ObjectProperty((None, None))
-    width_ = NumericProperty(None)
-    height_ = NumericProperty(None)
+class LoadDialog(FloatLayout):
+    load = ObjectProperty(None)
+    cancel = ObjectProperty(None)
 
+
+class CustBoxLayout(WindowDragBehavior, BoxLayout):
     def __init__(self, **kwargs):
         super(CustBoxLayout, self).__init__(**kwargs)
         self.drag_behavior_init(mode='horizontal')
@@ -245,35 +249,29 @@ class CustBoxLayout(WindowDragBehavior, BoxLayout):
         self.dropdown_shown = False
         self.dialog_shown = False
 
-        self.bind(width_=self.update_size_property)
-        self.bind(height_=self.update_size_property)
-
-    def update_size_property(self, *args):
-        self.size_ = (self.width_, self.height_)
+        self.ids.search_field.bind(
+            text=lambda *args: App.get_running_app().filter_results(*args))
 
     def show_load(self):
         self.dialog_shown = True
 
-        visible_wgs = [
-            self.ids.search_field, self.ids.dropdown_button,
-            self.ids.add_button, self.ids.item_list
-        ]
-        fade_anim = Animation(opacity=0, t='out_expo')
-        for wg in visible_wgs:
-            wg.old_opacity = wg.opacity
-            fade_anim.start(wg)
-
         content = LoadDialog(load=self.load, cancel=self.dismiss_popup)
         self._popup = Popup(title='Add file', content=content)
-        Clock.schedule_once(self._popup.open, 1)
+        Clock.schedule_once(self._popup.open, .3)
 
-        NEW_WIDTH = 800
-        self.expand(height=500, width=NEW_WIDTH)
+        new_size = (800, 500)
+        new_x = Window.left - (new_size[0] // 2) + (Window.size[0] // 2)
+        window_anim = Animation(size=new_size, left=new_x, t='out_expo', d=.5)
+        window_anim.start(Window)
 
     def load(self, *args):
         self.dismiss_popup()
 
-        path = args[1][0]
+        try:
+            path = args[1][0]
+
+        except IndexError:
+            path = args[0]
 
         Config.new(path)
 
@@ -281,68 +279,35 @@ class CustBoxLayout(WindowDragBehavior, BoxLayout):
         self.dialog_shown = False
 
         self._popup.dismiss()
-        self.expand(height=27, width=290)
 
-        visible_wgs = [
-            self.ids.search_field, self.ids.dropdown_button,
-            self.ids.add_button, self.ids.item_list
-        ]
-        for wg in visible_wgs:
-            fade_anim = Animation(opacity=wg.old_opacity, t='out_expo')
-            fade_anim.start(wg)
-
-    def expand(self, width: int = None, height: int = None, **anim_kwargs):
-        if width == None:
-            self.width_ = Window.width
-        else:
-            self.width_ = width
-
-        if height == None:
-            self.height_ = Window.height
-        else:
-            self.height_ = height
-
-        anim = Animation(size=self.size_, t='out_expo')
-        anim.bind(**anim_kwargs)
-        anim.start(Window)
-
-        Clock.schedule_once(lambda *args: self.center_window(), # hotfix for https://github.com/kivy/kivy/issues/5757
-                            getattr(
-                                anim,
-                                'duration',
-                                getattr(anim, 'd', 1)))
-
-    def center_window(self):
-        scw = GetSystemMetrics(0)
-        ww = Window.width
-
-        x = (scw // 2) - (ww // 2)
-
-        anim = Animation(left=x, t='out_expo')
-        anim.start(Window)
+        new_size = (300, 40)
+        new_x = Window.left - (new_size[0] // 2) + (Window.size[0] // 2)
+        window_anim = Animation(size=new_size, left=new_x, t='out_expo', d=.5)
+        Clock.schedule_once(lambda _: window_anim.start(Window), .1)
 
     def dropdown_show(self):
         if self.dropdown_shown:
             return
 
-        else:
-            self.dropdown_shown = True
+        self.dropdown_shown = True
 
         TRANS = 'out_expo'
         btn = self.ids.dropdown_button
 
-        btn.on_release = NOP
+        btn.on_release = lambda: None
 
-        win_anim = Animation(size=height(300), transition=TRANS)
-        button_out_anim = Animation(height=120, transition=TRANS, duration=.2)
-        button_in_anim = Animation(
-            height=btn.height, transition=TRANS, duration=.2)
+        win_anim = Animation(size=height(300), t=TRANS, d=.5)
+        button_out_anim = Animation(opacity=0, t=TRANS, d=.2)
+        button_in_anim = Animation(opacity=1, t=TRANS, d=.2)
 
-        def update_button(*args):
+        def update_button_icon(*args):
             btn.icon = 'md-cancel'
+
+        def restore_button_command(*args):
             btn.on_release = self.dropdown_hide
 
-        button_out_anim.on_complete = update_button
+        button_out_anim.bind(on_complete=update_button_icon)
+        button_in_anim.bind(on_complete=restore_button_command)
 
         start_times = {
             # ~ Animation: [after, widget] ~
@@ -360,31 +325,28 @@ class CustBoxLayout(WindowDragBehavior, BoxLayout):
             Clock.schedule_once(fn, time)
 
     def dropdown_hide(self, *args):
-        '''
-        args:
-            force - Forces dropdown to hide even if not *not self.dropdown_shown or self.dialog_shown or self.ids.search_field.focus*
-        '''
-        if not self.dropdown_shown or self.dialog_shown or self.ids.search_field.focus and not 'force' in args:
+        if not self.dropdown_shown:
             return
 
-        else:
-            self.dropdown_shown = False
+        self.dropdown_shown = False
 
         TRANS = 'out_expo'
         btn = self.ids.dropdown_button
 
-        btn.on_release = NOP
+        btn.on_release = lambda: None
 
-        win_anim = Animation(size=height(32), transition=TRANS)
-        button_out_anim = Animation(height=120, transition=TRANS, duration=.2)
-        button_in_anim = Animation(
-            height=btn.height, transition=TRANS, duration=.2)
+        win_anim = Animation(size=height(40), t=TRANS, d=.5)
+        button_out_anim = Animation(opacity=0, t=TRANS, d=.2)
+        button_in_anim = Animation(opacity=1, t=TRANS, d=.2)
 
-        def update_button(*args):
+        def update_button_icon(*args):
             btn.icon = 'md-arrow-drop-down-circle'
+
+        def restore_button_command(*args):
             btn.on_release = self.dropdown_show
 
-        button_out_anim.on_complete = update_button
+        button_out_anim.bind(on_complete=update_button_icon)
+        button_in_anim.bind(on_complete=restore_button_command)
 
         start_times = {
             # ~ Animation: [after, widget] ~
@@ -402,90 +364,69 @@ class CustBoxLayout(WindowDragBehavior, BoxLayout):
             Clock.schedule_once(fn, time)
 
 
-class LoadDialog(FloatLayout):
-    load = ObjectProperty(None)
-    cancel = ObjectProperty(None)
-
-
 class LauncherApp(App):
+    visible = BooleanProperty(True)
+    stop_request = BooleanProperty(False)
+
     def __init__(self, **kwargs):
         super(LauncherApp, self).__init__(**kwargs)
 
         Window.on_cursor_enter = self.set_countdown
 
+        self.bind(
+            visible=lambda *args: self.__toggle_visible(),
+            stop_request=self.stop_hook)
+        self.title = 'FastFastLauncher'
+
     def build(self):
         self.l = CustBoxLayout()
-
-        self.load_desktop()
-
-        inp = self.l.ids.search_field
-        inp.bind(text=self.filter_results)
-
-        TITLE = 'FastFastLauncher'
-        self.title = TITLE
-
-        Window.bind(on_cursor_leave=self.l.dropdown_hide)
-
         return self.l
 
-    def load_desktop(self):
-        paths = list_desktop()
-        items = prepare_rv_list(paths)
-        custom_items = prepare_rv_list(Config.get_all())
-        items.extend(custom_items)
+    def stop_hook(self, *args):
+        self.visible = False
+        Clock.schedule_once(self.stop, .5)
 
-        self.l.ids.item_list.data = items
+    def __toggle_visible(self, *args):
+        if self.visible:
+            self.show()
 
-    def set_countdown(self):
+        else:
+            self.hide()
+
+    def set_countdown(self, *args):
         if self.l.dropdown_shown or self.l.dialog_shown:
             return
 
-        Window.on_touch_down = self.cancel_countdown_touch
-        Window.on_cursor_leave = self.cancel_countdown
+        Window.bind(
+            on_touch_down=self.cancel_countdown,
+            on_cursor_leave=self.cancel_countdown)
 
-        TIME = .5
-        self.countdown_clock = Clock.schedule_once(self.move_window_away, TIME)
+        self.countdown_clock = Clock.schedule_once(self.hide, 1)
 
-    def cancel_countdown(self):
-        del Window.on_touch_down
-        del Window.on_cursor_leave
-
-        self.countdown_clock.cancel()
-
-        Window.on_cursor_enter = self.set_countdown
-
-    def cancel_countdown_touch(self, touch):
-        del Window.on_touch_down
-        del Window.on_cursor_leave
+    def cancel_countdown(self, *args):
+        Window.unbind(
+            on_touch_down=self.cancel_countdown,
+            on_cursor_leave=self.cancel_countdown)
 
         self.countdown_clock.cancel()
 
-        Window.on_touch_down(touch)
-        Window.on_cursor_enter = self.set_countdown
+    def hide(self, *args, **bkwargs):
+        self.orig_y = Window.top
+        new_y = self.orig_y - Window.height
 
-    def move_window_away(self, *args):
-        x = Window.left
-        y = Window.top
-
-        self.orig_pos = {'x': x, 'y': y}
-
-        curr_x = Window.left
-        w_width = Window.width
-
-        new_x = curr_x - w_width
-
-        anim = Animation(left=new_x, transition='out_expo', duration=.5)
+        anim = Animation(top=new_y, t='out_expo', d=.5)
+        anim.bind(**bkwargs)
         anim.start(Window)
 
-        self.pos_restore_hook()
+        self.show()
 
-    def pos_restore_hook(self):
+    def show(self, *args, **bkwargs):
         w = Window.width
         h = Window.height
 
-        x1 = self.orig_pos['x']
+        x1 = Window.left
         x2 = x1 + w
-        y1 = self.orig_pos['y'] - 1
+        y1 = self.orig_y - 1
         y2 = y1 + h
 
         def loop(*args):
@@ -494,26 +435,16 @@ class LauncherApp(App):
             horizontal_in = cursor_x > x1 and cursor_x < x2
             vertical_in = cursor_y > y1 and cursor_y < y2
 
-            if horizontal_in and vertical_in:
-                pass
+            if not (horizontal_in and vertical_in):
+                if self.visible:
+                    self.pos_check_clock.cancel()
+                    self.restore_pos(**bkwargs)
 
-            else:
-                self.restore_pos()
-                self.pos_check_clock.cancel()
+        self.pos_check_clock = Clock.schedule_interval(loop, .1)
 
-        INTERVAL = .1
-        self.pos_check_clock = Clock.schedule_interval(loop, INTERVAL)
-
-    def restore_pos(self):
-        x = self.orig_pos['x']
-
-        anim = Animation(left=x, transition='out_expo', duration=.5)
-
-        def restore_enter_event(*args):
-            Window.on_cursor_enter = self.set_countdown
-
-        anim.on_complete = restore_enter_event
-
+    def restore_pos(self, **bkwargs):
+        anim = Animation(top=self.orig_y, t='out_expo', d=.5)
+        anim.bind(**bkwargs)
         anim.start(Window)
 
     def item_click_callback(self, path):
@@ -521,95 +452,64 @@ class LauncherApp(App):
         self.l.dropdown_hide()
 
     def enter_hit_callback(self):
-        inp = self.l.ids.search_field
-        inp.text = ''
-
-        RV = self.l.ids.item_list
-        data = RV.data
+        data = self.l.ids.item_list.data
 
         if len(data) == 0:
             return
 
-        first_item = data[0]
-        path = first_item['path']
-
+        path = data[0]['path']
         open_file(path)
-        self.l.dropdown_hide()
+
+        self.l.ids.search_field.text = ''
 
     def filter_results(self, *args):
-        text = args[1]
+        text = dict(enumerate(args)).get(1, '')
 
         if text.strip() == '':
             self.l.dropdown_hide()
-            return
 
         else:
             self.l.dropdown_show()
 
         filtered_items = get_filtered(text)
-
-        RV = self.l.ids.item_list
-        RV.data = filtered_items
-
-    def _find_hwnd(self):
-        Window.create_window()
-
-        TITLE = self.title
-        self.HWND = win32gui.FindWindow(None, TITLE)
-
-        return self.HWND
-
-    def pos(self, pos: tuple = (None, None), size: tuple = (None, None)):
-        DEFAULT = (None, None)
-
-        if pos == DEFAULT and size == DEFAULT:
-            raise Exception('You have to put in atleast one of two parameters')
-
-        if pos == DEFAULT:
-            x = Window.left
-            y = Window.top
-
-            pos = (x, y)
-
-        if size == DEFAULT:
-            w = Window.width
-            h = Window.height
-
-            size = (w, h)
-
-        hwnd = self.HWND
-        win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, *pos, *size, 0)
-
-    def set_always_on_top(self, *args):
-        if not hasattr(self, 'HWND'):
-            raise Exception('Call "find_hwnd" method first!')
-
-        hwnd = self.HWND
-        rect = win32gui.GetWindowRect(hwnd)
-        x = rect[0]
-        y = rect[1]
-        w = rect[2] - x
-        h = rect[3] - y
-
-        win32gui.SetWindowPos(self.HWND, win32con.HWND_TOPMOST, x, y, w, h, 0)
+        self.l.ids.item_list.data = filtered_items
 
     def on_start(self):
-        # Executed when window loaded so it can set the position
+        sw = GetSystemMetrics(0)
+        ww = Window.width
 
-        self._find_hwnd()
+        Window.left = sw // 2 - ww // 2
+        Window.top = -1
 
-        screen_width = GetSystemMetrics(0)
-        window_width = Window.width
-
-        x = (screen_width // 2) - (window_width // 2)
-        y = 0
-
-        pos = ((x, y))
-        self.pos(pos)
-
-        Window.bind(on_draw=self.set_always_on_top)
+        register_topmost(Window, self.title)
 
 
-if __name__ == '__main__' or __name__ == 'main':
+class LauncherIcon(SysTrayIcon):
+    ICON = 'img/icon.ico'
+    TOOLTIP_TEXT = 'FastFastLauncher'
+
+    def __init__(self):
+        menu_options = (('Visible', None, self.toggle_visible), )
+
+        args = (self.ICON, self.TOOLTIP_TEXT)
+        kwargs = {
+            'on_quit': self.on_quit_callback,
+            'menu_options': menu_options,
+        }
+
+        super(LauncherIcon, self).__init__(*args, **kwargs)
+
+    def on_quit_callback(self, *args):
+        App.get_running_app().stop_request = True
+
+    def toggle_visible(self, *args):
+        app = App.get_running_app()
+        app.visible = not app.visible
+
+
+if __name__ == '__main__':
+    icon = LauncherIcon()
+    icon.start()
+
     launcher = LauncherApp()
     launcher.run()
