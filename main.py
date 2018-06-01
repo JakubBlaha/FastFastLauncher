@@ -411,12 +411,15 @@ class LauncherApp(App):
         self.countdown_clock.cancel()
 
     def hide(self, *args, **bkwargs):
-        self.orig_y = Window.top
-        new_y = self.orig_y - Window.height
+        new_y = - Window.height
 
-        anim = Animation(top=new_y, t='out_expo', d=.5)
-        anim.bind(**bkwargs)
-        anim.start(Window)
+        if hasattr(self, 'hide_anim'):
+            self.hide_anim.cancel(Window)
+            del self.hide_anim
+
+        self.hide_anim = Animation(top=new_y, t='out_expo', d=.5)
+        self.hide_anim.bind(**bkwargs)
+        self.hide_anim.start(Window)
 
         self.show()
 
@@ -426,7 +429,7 @@ class LauncherApp(App):
 
         x1 = Window.left
         x2 = x1 + w
-        y1 = self.orig_y - 1
+        y1 = -1
         y2 = y1 + h
 
         def loop(*args):
@@ -437,15 +440,19 @@ class LauncherApp(App):
 
             if not (horizontal_in and vertical_in):
                 if self.visible:
-                    self.pos_check_clock.cancel()
+                    Clock.unschedule(loop)
                     self.restore_pos(**bkwargs)
 
-        self.pos_check_clock = Clock.schedule_interval(loop, .1)
+        Clock.schedule_interval(loop, .1)
 
     def restore_pos(self, **bkwargs):
-        anim = Animation(top=self.orig_y, t='out_expo', d=.5)
-        anim.bind(**bkwargs)
-        anim.start(Window)
+        if hasattr(self, 'hide_anim'):
+            self.hide_anim.cancel(Window)
+            del self.hide_anim
+
+        self.hide_anim = Animation(top=0, t='out_expo', d=.5)
+        self.hide_anim.bind(**bkwargs)
+        self.hide_anim.start(Window)
 
     def item_click_callback(self, path):
         open_file(path)

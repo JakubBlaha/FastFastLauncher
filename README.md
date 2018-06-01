@@ -1,5 +1,10 @@
 # FastFastLauncher
 
+## V 1.3.1
+##### Bugfixes:
+ - Fixed bug which caused that you could do headbang with hide action
+ - Fixed bug which caused animation to stutter after some amout of times the hide / show action was triggered
+
 ## V 1.3
 ### New features:
  - FastFastLauncher now has a system tray icon
