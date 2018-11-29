@@ -1,0 +1,96 @@
+#:kivy 1.10.1
+#:import main main
+
+Root:
+<DesktopViewItem>:
+    text: self.name
+    text_size: self.size
+    valign: 'center'
+    padding_x: 10
+    background_color: .3, .3, .3, 1
+
+    Label:
+        text: root.type_string
+        center_y: root.center_y
+        right: root.width
+        color: .4, .4, .4, 1
+
+<IconButton>:
+    size_hint_x: None
+    width: self.height
+
+    canvas:
+        Color:
+            rgba: self.background_color
+        
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+        PushMatrix:
+
+        Rotate:
+            angle: self.icon_angle
+            origin: self.center
+
+        Color:
+            rgba: 1, 1, 1, 1
+
+        Rectangle:
+            pos: self.x + self.padding + self.width * (1 - self._icon_side_size_normal) / 2, self.y + self.padding + self.height * (1 - self._icon_side_size_normal) / 2
+            size: (self._icon_side_size_normal * self.width - self.padding * 2,) * 2
+            source: self.icon
+
+    canvas.after:
+        PopMatrix:
+
+<Root>:
+    orientation: 'vertical'
+    window_drag_mode: 'horizontal'
+
+    BoxLayout:
+        size_hint_y: None
+        height: main.CONTROL_PANEL_HEIGHT
+
+        SearchInput:
+            id: search_input
+            multiline: False
+            background_color: .1, .1, .1, 1
+            cursor_color: 1, 1, 1, 1
+            foreground_color: 1, 1, 1, 1
+            font_size: 22
+            valign: 'center'
+            hint_text: 'Search here..'
+            hint_text_color: .2, .2, .2, self._hint_text_alpha
+            selection_color: self.hint_text_color[:-1] + [.5]
+            padding_x: 14
+            on_text_validate: root.open_first_item()
+
+        IconButton:
+            id: dropdown_btn
+            icon: 'img/icons/arrow.png'
+            background_color: 0, 0, 0, 0
+            padding: 10
+            on_release: root.list_shown = not root.list_shown
+
+    DesktopView:
+        id: desktop_view
+        viewclass: 'DesktopViewItem'
+
+        canvas.before:
+            Color:
+                rgba: self._no_results_color
+
+            Rectangle:
+                group: 'face'
+                source: 'img/face.png'
+                size: self._face_size
+                pos: self.x + (self.width - self._face_size[0]) / 2, self.y + (self.height - self._face_size[1]) / 2
+
+        RecycleBoxLayout:
+            orientation: 'vertical'
+            default_size: None, 30
+            default_size_hint: 1, None
+            size_hint: 1, None
+            height: self.minimum_height
+

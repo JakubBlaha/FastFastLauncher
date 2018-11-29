@@ -1,522 +1,418 @@
-from win32api import GetSystemMetrics
-from win32gui import GetCursorInfo
-from KivyOnTop import *
+CONTROL_PANEL_HEIGHT = 40
+WINDOW_HEIGHT_EXPANDED = 300
+
+import kivy
+kivy.require('1.10.1')
+
+from kivy.logger import Logger
+
+from kivy import Config
+Config.set('graphics', 'multisamples', 0) # OpenGL bug hotfix
+Config.set('graphics', 'width', 300)
+Config.set('graphics', 'height', CONTROL_PANEL_HEIGHT)
+Config.set('graphics', 'borderless', True)
+Config.set('graphics', 'resizable', False)
+Config.set('kivy', 'exit_on_escape', False)
+
+from kivy.app import App
+
+from kivy.uix.widget import Widget
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button, ButtonBehavior
+from kivy.uix.recycleview import RecycleView
+from kivy.uix.textinput import TextInput
+
+from kivy.properties import StringProperty, NumericProperty, ListProperty, BooleanProperty
+
+from kivy.clock import Clock
+from kivy.animation import Animation
+from kivy.core.window import Window
+
+from kivy.graphics import Rectangle
+
 import os
 import sys
 import win32com.client
 import win32gui
-import win32con
-from infi.systray import SysTrayIcon
+import infi.systray
+import yaml
+import itertools
 
-import kivy
-kivy.require('1.10.0')
+from window_drag_behavior import WindowDragBehavior
 
-from kivy.config import Config
+from KivyOnTop import register_topmost
+register_topmost(Window, 'FFL')
 
-Config.set('graphics', 'multisamples', 0)
-Config.set('graphics', 'height', '40')
-Config.set('graphics', 'width', '300')
-Config.set('graphics', 'borderless', '1')
-Config.set('graphics', 'minimum_height', '40')
-Config.set('graphics', 'minimum_width', '300')
-Config.set('graphics', 'resizable', 0)
-Config.set('input', 'mouse', 'mouse, disable_multitouch')
-
-from kivy.app import App
-from kivy.core.window import Window
-from kivy.clock import Clock
-from kivy.animation import Animation
-from kivy.properties import ObjectProperty
-from kivy.properties import BooleanProperty
-
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.popup import Popup
-from kivymd.button import MaterialIconButton
+DESKTOP_RELOAD_INTERVAL = 10
+WINDOW_HIDE_MIN_TIME = 1.5
+WINDOW_HIDE_CHECK_INTERVAL = 1 / int(Config.get('graphics', 'maxfps'))
 
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    base_path = getattr(sys, '_MEIPASS',
-                        os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, relative_path)
-
-
-def get_desktop_dir() -> list:
-    desktop_path = os.path.join(os.environ['HOMEPATH'], 'Desktop')
-
-    return desktop_path
-
-
-def get_lnk_target(lnk: str) -> str:
+def get_lnk_path(path_to_lnk):
     shell = win32com.client.Dispatch("WScript.Shell")
-    shortcut = shell.CreateShortCut(lnk)
+    shortcut = shell.CreateShortcut(path_to_lnk)
     return shortcut.Targetpath
 
 
-def width(value: int) -> tuple:
-    h = Window.height
-    size = (value, h)
+def get_type_string(filename):
+    ext = os.path.splitext(filename)[1]
 
-    return size
+    if ext == '.lnk':
+        ext = os.path.splitext(get_lnk_path(filename))[1]
 
+    TYPES = {'': 'dir', '.exe': 'App'}
 
-def height(value: int) -> tuple:
-    w = Window.width
-    size = (w, value)
+    if ext in TYPES:
+        return TYPES[ext]
 
-    return size
+    return ext
 
 
-def prepare_rv_list(paths: list) -> list:
-    LNK = '.lnk'
-    paths = [
-        get_lnk_target(path) if os.path.splitext(path)[1] == LNK else path
-        for path in paths
-    ]
+class SearchInput(TextInput):
+    _hint_text_alpha = NumericProperty(1)
 
-    basenames = [os.path.splitext(os.path.basename(path))[0] for path in paths]
-    exts = [os.path.splitext(path)[1].replace('.', '') for path in paths]
-    exts = [
-        ext if os.path.isfile(paths[index]) else 'dir'
-        for index, ext in enumerate(exts)
-    ]
+    def on_focus(self, __, has_focus):
+        Animation(_hint_text_alpha=not has_focus, d=.1).start(self)
 
-    items = [{
-        'path': path,
-        'text': base,
-        'ext': ext
-    } for path, base, ext in zip(paths, basenames, exts)]
 
-    return items
+class DesktopViewItem(Button):
+    name = StringProperty()
+    ''' Filename. '''
 
+    path = ''
+    ''' Absolute path to the file. '''
 
-def get_filtered(string_: str) -> list:
-    paths = list_desktop()
-    paths.extend(Config.get_all())
-    items = prepare_rv_list(paths)
+    type_string = StringProperty()
+    ''' Gray text displayed on the right side of the widget. Eg. *dir*,
+    *exe*, etc. '''
 
-    condition = lambda item: string_.lower() in f"{item['text']}{item['ext']}".lower()
-    filtered_items = filter(condition, items)
+    def on_release(self):
+        self.open_path()
 
-    return filtered_items
+    def open_path(self):
+        os.startfile(self.path)
 
+    def on_name(self, __, name):
+        self.name = name.strip('.lnk')
 
-def list_desktop() -> list:
-    desktop = get_desktop_dir()
-    items = os.listdir(get_desktop_dir())
-    items.remove('desktop.ini')
-    for item, index in zip(items, range(len(items))):
-        items[index] = f"{desktop}\\{item}"
 
-    return items
+class PseudoDirentry:
+    name = None
+    path = None
 
+    def __init__(self, name, path):
+        self.name = name
+        self.path = path
 
-def open_file(path: str):
-    path = os.path.abspath(path)
-    start = lambda path: os.startfile(path)
 
-    if os.path.exists(path):
-        start(path)
+class DesktopView(RecycleView):
+    _desktop_path = os.path.expanduser('~\\Desktop')
+    _no_results_color = ListProperty((0, 0, 0, 0))
+    _face_size = (140 * .8, 121 * .8)
 
-    else:
-        x86 = 'Program Files (x86)'
-        x64 = 'Program Files'
+    def __init__(self, **kw):
+        super().__init__(**kw)
 
-        path = path.replace(x86, x64)
+        self.reload_desktop()
+        Clock.schedule_interval(self.reload_and_filter,
+                                DESKTOP_RELOAD_INTERVAL)
 
-        start(path)
+    def reload_and_filter(self, *args):
+        self.reload_desktop()
+        self.filter_items()
 
+    def reload_desktop(self, *args):
+        ''' Reloads items from desktop + custom paths. '''
 
-class Config:
-    PATH = os.path.expanduser('~\\.xtremeware\\FastFastLauncher\\paths.txt')
-    paths = []
+        self.data = []
 
-    @staticmethod
-    def new(path: str):
-        Config._ensure_config_file()
-        Config._ensure_loaded()
+        CustomDirentrys = [
+            PseudoDirentry(name=os.path.split(path)[1], path=path)
+            for path in getattr(Config, 'CustomPaths', set())
+        ]
 
-        if path in Config.paths:
-            return
+        for direntry in itertools.chain(
+                os.scandir(self._desktop_path), CustomDirentrys):
+            if direntry.path in [item['path'] for item in self.data]:
+                continue
 
-        with open(Config.PATH, 'a') as f:
-            f.write(path + '\n')
+            self.data.append({
+                'name': os.path.splitext(direntry.name)[0],
+                'path': direntry.path,
+                'type_string': get_type_string(direntry.path),
+            })
 
-        Config.paths.append(path)
+    def filter_items(self, *args):
+        ''' Filters shown data by the searched term. '''
 
-    @staticmethod
-    def remove(path: str):
-        Config._ensure_config_file()
+        self.reload_desktop()
+        term = app.root.ids.search_input.text.lower().replace('.', '')
 
-        with open(Config.PATH) as f:
-            paths = [line for line in f]
+        new_data = []
+        for item in self.data:
+            if term in f"{item['path']}{item['type_string']}".lower():
+                new_data.append(item)
 
-        paths = [path_ for path_ in paths if path_ != path]
+        self.data = new_data
 
-        with open(Config.PATH) as f:
-            f.writelines(paths)
+    def on_data(self, *__):
+        ''' Will sort shown data by the text.'''
 
-    @staticmethod
-    def get_all() -> list:
-        Config._ensure_config_file()
-        Config._ensure_loaded()
+        data = list(self.data)
+        data.sort(key=lambda item: item['name'])
+        self.unbind(data=self.on_data)
+        self.data = data
+        self.bind(data=self.on_data)
 
-        return Config.paths
+        # self._no_results_color = (1, 1, 1, not len(data))
+        Animation(
+            _no_results_color=(1, 1, 1, (not self.data) * .2),
+            d=.2).start(self)
 
-    @staticmethod
-    def _get_paths() -> list:
-        with open(Config.PATH) as f:
-            return [path.replace('\n', '') for path in f.readlines()]
 
-    @staticmethod
-    def _update_paths():
-        Config.paths = Config._get_paths()
+class IconButton(ButtonBehavior, Widget):
+    icon = StringProperty()
+    """ The relative path to the icon. """
 
-    @staticmethod
-    def _ensure_config_file():
-        dirname = os.path.dirname(Config.PATH)
-        if not os.path.isdir(dirname):
-            os.makedirs(dirname)
+    background_color = ListProperty((1, 1, 1, 1))
+    """ The color used for drawing background. """
 
-        if not os.path.isfile(Config.PATH):
-            Config._create_empty_file(Config.PATH)
+    padding = NumericProperty()
+    """ Distance from the border of the button to the border of the image. """
 
-    @staticmethod
-    def _create_empty_file(path: str):
-        open(path, 'w').close()
+    icon_angle = NumericProperty()
+    """ Rotation of the image. """
 
-    @staticmethod
-    def _ensure_loaded():
-        if Config.paths == []:
-            Config._update_paths()
+    _icon_side_size_normal = NumericProperty(1)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            Animation(
+                _icon_side_size_normal=.8, d=.3, t='out_expo').start(self)
 
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        Animation(_icon_side_size_normal=1, d=.3, t='out_expo').start(self)
+        return super().on_touch_up(touch)
+
+
+class Root(WindowDragBehavior, BoxLayout):
+    _list_shown = False
+    _window_state_event = None
+    _window_state = 'HIDDEN'
+    _user_request_window_state = 'VISIBLE'
 
-class WindowDragBehavior:
-    both = False
-    horizontal = False
-    vertical = False
+    def __init__(self, **kw):
+        super().__init__(**kw)
 
-    def drag_behavior_init(self, mode: str = 'both'):
-        '''
-        mode - both, horizontal, vertical
-        '''
+        self.ids.search_input.bind(
+            focus=lambda __, val: setattr(self, 'list_shown', val),
+            text=self.ids.desktop_view.filter_items)
 
-        exec(f'self.{mode} = True')
+        self._window_state_conditions_check_clock = Clock.schedule_interval(
+            self._check_window_state_conditions, WINDOW_HIDE_CHECK_INTERVAL)
+        self._window_state_event = Clock.create_trigger(
+            self._change_window_state_if_conditions, WINDOW_HIDE_MIN_TIME)
 
-        self.bind(on_touch_down=self._on_touch_down)
-        self.bind(on_touch_up=self._on_touch_up)
+        Window.bind(on_dropfile=self.on_dropfile, focus=self.on_window_focus)
 
-    def _on_touch_down(self, _, touch):
-        self._click(touch)
-        self.drag_clock = Clock.schedule_interval(self._drag, 1 / 60)
+    @property
+    def list_shown(self):
+        return self._list_shown
 
-    def _on_touch_up(self, _, touch):
-        if hasattr(self, 'drag_clock'):
-            self.drag_clock.cancel()
+    @list_shown.setter
+    def list_shown(self, value):
+        self._list_shown = value
 
-    def _click(self, touch):
-        x = touch.x
-        y = touch.y
+        Animation(
+            size=(Window.width,
+                  WINDOW_HEIGHT_EXPANDED if value else CONTROL_PANEL_HEIGHT),
+            d=.5,
+            t='out_expo').start(Window)
 
-        y = Window.height - y
+        Animation(
+            icon_angle=180 * value, d=.3,
+            t='out_expo').start(self.ids.dropdown_btn)
 
-        self.touch_x, self.touch_y = x, y
+    @property
+    def _will_touch_cursor(self):
+        ''' Will window touch the curson when it will be visible? '''
 
-    def _drag(self, *args):
-        x, y = win32gui.GetCursorPos()
+        *__, (x, y) = win32gui.GetCursorInfo()
+        return Window.left <= x <= Window.left + Window.width and 0 <= y <= Window.height
 
-        x -= self.touch_x
-        y -= self.touch_y
+    @property
+    def window_state(self):
+        return self._window_state
 
-        if self.both or self.horizontal:
-            Window.left = x
+    @window_state.setter
+    def window_state(self, value):
+        print(value, self._window_state)
+        VALID_VALUES = ('VISIBLE', 'HIDDEN', 'INVERT')
+        if value not in VALID_VALUES:
+            raise ValueError
 
-        if self.both or self.vertical:
-            Window.top = y
+        if value == 'INVERT':
+            self._window_state = 'VISIBLE' if self._window_state == 'HIDDEN' else 'HIDDEN'
+        else:
+            self._window_state = value
 
+        Animation.stop_all(Window)
+        Animation(
+            top=0 if self._window_state == 'VISIBLE' else -Window.height,
+            d=.5,
+            t='out_expo').start(Window)
 
-class LoadDialog(FloatLayout):
-    load = ObjectProperty(None)
-    cancel = ObjectProperty(None)
+    @property
+    def user_request_window_state(self):
+        return self._user_request_window_state
 
+    @user_request_window_state.setter
+    def user_request_window_state(self, value):
+        VALID_VALUES = ('VISIBLE', 'HIDDEN', 'INVERT')
+        if value not in VALID_VALUES:
+            raise ValueError
 
-class CustBoxLayout(WindowDragBehavior, BoxLayout):
-    def __init__(self, **kwargs):
-        super(CustBoxLayout, self).__init__(**kwargs)
-        self.drag_behavior_init(mode='horizontal')
+        if value == 'INVERT':
+            self._user_request_window_state = 'VISIBLE' if self._user_request_window_state == 'HIDDEN' else 'HIDDEN'
+        else:
+            self._user_request_window_state = value
 
-        self.dropdown_shown = False
-        self.dialog_shown = False
+    def _check_window_state_conditions(self, *args):
+        if (self._will_touch_cursor
+                and not self._window_state_event.is_triggered
+                and self.user_request_window_state == self.window_state):
+            self._window_state_event()
 
-        self.ids.search_field.bind(
-            text=lambda *args: App.get_running_app().filter_results(*args))
+        elif (self.user_request_window_state != self.window_state
+              and not self._will_touch_cursor):
+            self.window_state = 'INVERT'
 
-    def show_load(self):
-        self.dialog_shown = True
+        elif not self._will_touch_cursor:
+            self._window_state_event.cancel()
 
-        content = LoadDialog(load=self.load, cancel=self.dismiss_popup)
-        self._popup = Popup(title='Add file', content=content)
-        Clock.schedule_once(self._popup.open, .3)
+    def _change_window_state_if_conditions(self, *args):
+        if self._will_touch_cursor and not self.list_shown:
+            # may cause issues if window hidden and list shown
+            self.window_state = 'INVERT'
 
-        new_size = (800, 500)
-        new_x = Window.left - (new_size[0] // 2) + (Window.size[0] // 2)
-        window_anim = Animation(size=new_size, left=new_x, t='out_expo', d=.5)
-        window_anim.start(Window)
+    def on_dropfile(self, __, path):
+        CustomPaths = getattr(Config, 'CustomPaths', set)
+        if not isinstance(CustomPaths, set):
+            CustomPaths = set()
 
-    def load(self, *args):
-        self.dismiss_popup()
+        CustomPaths.update({path.decode('utf-8')})
+        Config.CustomPaths = CustomPaths
 
+        self.ids.desktop_view.reload_and_filter()
+
+    def on_window_focus(self, *__):
+        self.ids.search_input.focus = False
+
+    def open_first_item(self, *args):
         try:
-            path = args[1][0]
-
+            self.ids.desktop_view.layout_manager.children[-1].open_path()
         except IndexError:
-            path = args[0]
-
-        Config.new(path)
-
-    def dismiss_popup(self):
-        self.dialog_shown = False
-
-        self._popup.dismiss()
-
-        new_size = (300, 40)
-        new_x = Window.left - (new_size[0] // 2) + (Window.size[0] // 2)
-        window_anim = Animation(size=new_size, left=new_x, t='out_expo', d=.5)
-        Clock.schedule_once(lambda _: window_anim.start(Window), .1)
-
-    def dropdown_show(self):
-        if self.dropdown_shown:
-            return
-
-        self.dropdown_shown = True
-
-        TRANS = 'out_expo'
-        btn = self.ids.dropdown_button
-
-        btn.on_release = lambda: None
-
-        win_anim = Animation(size=height(300), t=TRANS, d=.5)
-        button_out_anim = Animation(opacity=0, t=TRANS, d=.2)
-        button_in_anim = Animation(opacity=1, t=TRANS, d=.2)
-
-        def update_button_icon(*args):
-            btn.icon = 'md-cancel'
-
-        def restore_button_command(*args):
-            btn.on_release = self.dropdown_hide
-
-        button_out_anim.bind(on_complete=update_button_icon)
-        button_in_anim.bind(on_complete=restore_button_command)
-
-        start_times = {
-            # ~ Animation: [after, widget] ~
-            win_anim: [0, Window],
-            button_out_anim: [0, btn],
-            button_in_anim: [.2, btn]
-        }
-
-        for anim, values in start_times.items():
-            time = values[0]
-            widget = values[1]
-
-            fn = lambda clock, anim=anim, widget=widget: anim.start(widget)
-
-            Clock.schedule_once(fn, time)
-
-    def dropdown_hide(self, *args):
-        if not self.dropdown_shown:
-            return
-
-        self.dropdown_shown = False
-
-        TRANS = 'out_expo'
-        btn = self.ids.dropdown_button
-
-        btn.on_release = lambda: None
-
-        win_anim = Animation(size=height(40), t=TRANS, d=.5)
-        button_out_anim = Animation(opacity=0, t=TRANS, d=.2)
-        button_in_anim = Animation(opacity=1, t=TRANS, d=.2)
-
-        def update_button_icon(*args):
-            btn.icon = 'md-arrow-drop-down-circle'
-
-        def restore_button_command(*args):
-            btn.on_release = self.dropdown_show
-
-        button_out_anim.bind(on_complete=update_button_icon)
-        button_in_anim.bind(on_complete=restore_button_command)
-
-        start_times = {
-            # ~ Animation: [after, widget] ~
-            win_anim: [0, Window],
-            button_out_anim: [0, btn],
-            button_in_anim: [.2, btn]
-        }
-
-        for anim, values in start_times.items():
-            time = values[0]
-            widget = values[1]
-
-            fn = lambda clock, anim=anim, widget=widget: anim.start(widget)
-
-            Clock.schedule_once(fn, time)
-
-
-class LauncherApp(App):
-    visible = BooleanProperty(True)
-    stop_request = BooleanProperty(False)
-
-    def __init__(self, **kwargs):
-        super(LauncherApp, self).__init__(**kwargs)
-
-        Window.on_cursor_enter = self.set_countdown
-
-        self.bind(
-            visible=lambda *args: self.__toggle_visible(),
-            stop_request=self.stop_hook)
-        self.title = 'FastFastLauncher'
-
-    def build(self):
-        self.l = CustBoxLayout()
-        return self.l
-
-    def stop_hook(self, *args):
-        self.visible = False
-        Clock.schedule_once(self.stop, .5)
-
-    def __toggle_visible(self, *args):
-        if self.visible:
-            self.show()
-
+            pass
         else:
-            self.hide()
+            self.ids.search_input.text = ''
 
-    def set_countdown(self, *args):
-        if self.l.dropdown_shown or self.l.dialog_shown:
-            return
 
-        Window.bind(
-            on_touch_down=self.cancel_countdown,
-            on_cursor_leave=self.cancel_countdown)
-
-        self.countdown_clock = Clock.schedule_once(self.hide, 1)
-
-    def cancel_countdown(self, *args):
-        Window.unbind(
-            on_touch_down=self.cancel_countdown,
-            on_cursor_leave=self.cancel_countdown)
-
-        self.countdown_clock.cancel()
-
-    def hide(self, *args, **bkwargs):
-        new_y = - Window.height
-
-        if hasattr(self, 'hide_anim'):
-            self.hide_anim.cancel(Window)
-            del self.hide_anim
-
-        self.hide_anim = Animation(top=new_y, t='out_expo', d=.5)
-        self.hide_anim.bind(**bkwargs)
-        self.hide_anim.start(Window)
-
-        self.show()
-
-    def show(self, *args, **bkwargs):
-        w = Window.width
-        h = Window.height
-
-        x1 = Window.left
-        x2 = x1 + w
-        y1 = -1
-        y2 = y1 + h
-
-        def loop(*args):
-            *rest, (cursor_x, cursor_y) = GetCursorInfo()
-
-            horizontal_in = cursor_x > x1 and cursor_x < x2
-            vertical_in = cursor_y > y1 and cursor_y < y2
-
-            if not (horizontal_in and vertical_in):
-                if self.visible:
-                    Clock.unschedule(loop)
-                    self.restore_pos(**bkwargs)
-
-        Clock.schedule_interval(loop, .1)
-
-    def restore_pos(self, **bkwargs):
-        if hasattr(self, 'hide_anim'):
-            self.hide_anim.cancel(Window)
-            del self.hide_anim
-
-        self.hide_anim = Animation(top=0, t='out_expo', d=.5)
-        self.hide_anim.bind(**bkwargs)
-        self.hide_anim.start(Window)
-
-    def item_click_callback(self, path):
-        open_file(path)
-        self.l.dropdown_hide()
-
-    def enter_hit_callback(self):
-        data = self.l.ids.item_list.data
-
-        if len(data) == 0:
-            return
-
-        path = data[0]['path']
-        open_file(path)
-
-        self.l.ids.search_field.text = ''
-
-    def filter_results(self, *args):
-        text = dict(enumerate(args)).get(1, '')
-
-        if text.strip() == '':
-            self.l.dropdown_hide()
-
-        else:
-            self.l.dropdown_show()
-
-        filtered_items = get_filtered(text)
-        self.l.ids.item_list.data = filtered_items
-
+class FFLApp(App):
     def on_start(self):
-        sw = GetSystemMetrics(0)
-        ww = Window.width
+        Window.top = -Window.height
+        self.root.user_request_window_state = getattr(Config, 'window_state',
+                                                      'VISIBLE')
 
-        Window.left = sw // 2 - ww // 2
-        Window.top = -1
+    def stop(self):
+        tray.shutdown()
+        return super().stop()
 
-        register_topmost(Window, self.title)
+    def request_stop(self):
+        tray.shutdown()
+        self.root._window_state_conditions_check_clock.cancel()
+        self.root.window_state = 'HIDDEN'
+        Clock.schedule_interval(self._stop_if_conditions,
+                                WINDOW_HIDE_CHECK_INTERVAL)
+
+    def _stop_if_conditions(self, *args):
+        if Window.top <= -Window.height:
+            self.stop()
+            return False
 
 
-class LauncherIcon(SysTrayIcon):
-    ICON = 'img/icon.ico'
-    TOOLTIP_TEXT = 'FastFastLauncher'
+class TrayIcon(infi.systray.SysTrayIcon):
+    def __init__(self, *args, **kw):
+        MENU_OPTIONS = (('Show / Hide', None, self._show_hide_callbak), )
 
-    def __init__(self):
-        menu_options = (('Visible', None, self.toggle_visible), )
+        super().__init__(
+            'img/icon.ico',
+            'FastFastLauncher',
+            MENU_OPTIONS,
+            default_menu_index=0,
+            on_quit=self.on_quit)
 
-        args = (self.ICON, self.TOOLTIP_TEXT)
-        kwargs = {
-            'on_quit': self.on_quit_callback,
-            'menu_options': menu_options,
-        }
+    def on_quit(self, *__):
+        app.request_stop()
 
-        super(LauncherIcon, self).__init__(*args, **kwargs)
+    def shutdown(self):
+        try:
+            return super().shutdown()
+        except RuntimeError:
+            pass
 
-    def on_quit_callback(self, *args):
-        App.get_running_app().stop_request = True
+    def _show_hide_callbak(self, *__):
+        app.root.user_request_window_state = 'INVERT'
+        Config.window_state = app.root.user_request_window_state
 
-    def toggle_visible(self, *args):
-        app = App.get_running_app()
-        app.visible = not app.visible
+
+class ConfigMeta(type):
+    PATH = 'config.yaml'
+
+    def __getattr__(cls, key):
+        cls._ensure_file()
+
+        with open(cls.PATH) as f:
+            try:
+                return yaml.load(f)[key]
+            except KeyError:
+                raise AttributeError
+
+    def __setattr__(cls, key, value):
+        with open(cls.PATH) as f:
+            data = yaml.load(f)
+
+        data[key] = value
+
+        with open(cls.PATH, 'w') as f:
+            yaml.dump(data, f)
+
+    def _ensure_file(cls):
+        try:
+            assert os.path.isfile(cls.PATH)
+
+            with open(cls.PATH) as f:
+                _data = yaml.load(f)
+
+            assert isinstance(_data, dict)
+
+        except Exception:
+            cls._create_file()
+
+    def _create_file(cls):
+        os.makedirs(os.path.split(cls.PATH)[0], exist_ok=True)
+        with open(cls.PATH, 'w') as f:
+            yaml.dump({'App': 'FastFastLauncher'}, f)
+
+
+class Config(metaclass=ConfigMeta):
+    PATH = '.config/config.yaml'
 
 
 if __name__ == '__main__':
-    icon = LauncherIcon()
-    icon.start()
+    tray = TrayIcon()
+    tray.start()
 
-    launcher = LauncherApp()
-    launcher.run()
+    app = FFLApp()
+    app.run()
