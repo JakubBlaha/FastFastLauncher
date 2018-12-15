@@ -1,8 +1,6 @@
 # FastFastLauncher
 
 ## v1.3.2
-*Rewritten the whole app from scratch. Old files still present.*
-
 **Features**
  - Drag and drop to add a custom path.
  - Removed the *plus button* and the *file selector* for adding new paths.
