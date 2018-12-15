@@ -13,6 +13,7 @@ Config.set('graphics', 'height', CONTROL_PANEL_HEIGHT)
 Config.set('graphics', 'borderless', True)
 Config.set('graphics', 'resizable', False)
 Config.set('kivy', 'exit_on_escape', False)
+Config.set('input', 'mouse', 'mouse, multitouch_on_demand')
 
 from kivy.app import App
 
