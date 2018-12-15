@@ -6,6 +6,9 @@
  - Removed the *plus button* and the *file selector* for adding new paths.
  - Remebers the last window state.
 
+**Bugfixes**
+ - Fixed bug causing that it was needed to click twice when the window focus was lost in order to interact with the widgets.
+
 **Other**
  - Window hide/show delay is now *1.5s*.
  - Few UI tweaks.

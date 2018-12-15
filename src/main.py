@@ -216,7 +216,7 @@ class Root(WindowDragBehavior, BoxLayout):
         self._window_state_event = Clock.create_trigger(
             self._change_window_state_if_conditions, WINDOW_HIDE_MIN_TIME)
 
-        Window.bind(on_dropfile=self.on_dropfile, focus=self.on_window_focus)
+        Window.bind(on_dropfile=self.on_dropfile, focus=self.on_window_focus, on_cursor_enter=lambda *__: Window.show())
 
     @property
     def list_shown(self):
@@ -417,3 +417,5 @@ if __name__ == '__main__':
 
     app = FFLApp()
     app.run()
+
+__version__ = '1.3.2'
