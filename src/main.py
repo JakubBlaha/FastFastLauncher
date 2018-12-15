@@ -283,7 +283,8 @@ class Root(WindowDragBehavior, BoxLayout):
     def _check_window_state_conditions(self, *args):
         if (self._will_touch_cursor
                 and not self._window_state_event.is_triggered
-                and self.user_request_window_state == self.window_state):
+                and self.user_request_window_state == self.window_state
+                and not self.list_shown):
             self._window_state_event()
 
         elif (self.user_request_window_state != self.window_state
